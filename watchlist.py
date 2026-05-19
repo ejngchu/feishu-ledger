@@ -298,6 +298,29 @@ def query_etf(items: list[HoldingItem], df_all: pd.DataFrame):
         }
 
 
+def _fetch_fund_change_from_history(fund_code: str) -> Optional[float]:
+    """
+    从 fund_open_fund_info_em 获取单只基金的历史数据，
+    返回最新一条记录的日涨跌幅（百分比数值，如 -1.14）。
+    如果获取失败或无数据返回 None。
+    """
+    import akshare as ak
+    try:
+        df = ak.fund_open_fund_info_em(symbol=fund_code)
+        if df is None or df.empty:
+            return None
+        # 历史数据列: 日期, 单位净值, 日增长率
+        if len(df.columns) >= 3:
+            # 取最新一条（按日期降序）
+            df = df.sort_values(df.columns[0], ascending=False)
+            latest = df.iloc[0]
+            change = latest[df.columns[2]]  # 日增长率列
+            return to_float(change)
+    except Exception:
+        pass
+    return None
+
+
 def query_fund(items: list[HoldingItem], df_all: pd.DataFrame):
     """
     从开放式基金 DataFrame 中匹配。
@@ -330,7 +353,11 @@ def query_fund(items: list[HoldingItem], df_all: pd.DataFrame):
         r = row.iloc[0]
         it.matched = True
         it.price = r.get(nav_col) if nav_col else None
-        it.change_pct = r.get("日增长率")
+        change_pct = r.get("日增长率")
+        # 如果日增长率为空（None、NaN或空字符串），尝试从历史数据获取
+        if change_pct is None or (isinstance(change_pct, float) and pd.isna(change_pct)) or (isinstance(change_pct, str) and change_pct.strip() == ""):
+            change_pct = _fetch_fund_change_from_history(it.raw_code)
+        it.change_pct = change_pct
         it.change_amt = r.get("日增长值")
         it.extra = {
             "累计净值": r.get(acc_nav_col) if acc_nav_col else None,
