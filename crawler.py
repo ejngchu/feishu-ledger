@@ -8,6 +8,7 @@
     python -c "import crawler; print(crawler.crawl(['sz000333','hk00700']))"
 """
 
+import argparse
 import io
 import json
 import sys
@@ -60,20 +61,32 @@ def crawl(codes: list[str], quiet: bool = True) -> list[dict]:
 
     try:
         if stock_a_items:
-            df = watchlist.fetch_stock_a_data()
-            watchlist.query_stock_a(items, df)
+            try:
+                df = watchlist.fetch_stock_a_data()
+                watchlist.query_stock_a(items, df)
+            except Exception as e:
+                sys.stderr.write(f"  [WARN] A股数据获取失败: {e}\n")
 
         if hk_items:
-            df = watchlist.fetch_hk_stock_data()
-            watchlist.query_hk_stock(items, df)
+            try:
+                df = watchlist.fetch_hk_stock_data()
+                watchlist.query_hk_stock(items, df)
+            except Exception as e:
+                sys.stderr.write(f"  [WARN] 港股数据获取失败: {e}\n")
 
         if etf_items:
-            df = watchlist.fetch_etf_data()
-            watchlist.query_etf(items, df)
+            try:
+                df = watchlist.fetch_etf_data()
+                watchlist.query_etf(items, df)
+            except Exception as e:
+                sys.stderr.write(f"  [WARN] ETF数据获取失败: {e}\n")
 
         if fund_items:
-            df = watchlist.fetch_open_fund_data()
-            watchlist.query_fund(items, df)
+            try:
+                df = watchlist.fetch_open_fund_data()
+                watchlist.query_fund(items, df)
+            except Exception as e:
+                sys.stderr.write(f"  [WARN] 基金数据获取失败: {e}\n")
     finally:
         if quiet:
             sys.stdout = _stdout
@@ -95,19 +108,28 @@ def crawl(codes: list[str], quiet: bool = True) -> list[dict]:
             "matched": it.matched,
             "price": price,
             "change_pct": change_pct,
+            "date": it.date,
         })
 
     return results
 
 
 def main():
-    """CLI 入口：从 stdin 读取 JSON 数组，输出 JSON 到 stdout"""
+    """CLI 入口：从 stdin 或 --codes 参数读取 JSON 数组，输出 JSON 到 stdout"""
+    parser = argparse.ArgumentParser(description="爬取股票/ETF/基金数据")
+    parser.add_argument("--codes", type=str, help='JSON 数组字符串，如 \'["sz000333","hk00700"]\'')
+    args = parser.parse_args()
+
     try:
-        raw = sys.stdin.read()
-        if not raw.strip():
-            print(json.dumps([], ensure_ascii=False))
-            return
-        codes = json.loads(raw)
+        if args.codes:
+            codes = json.loads(args.codes)
+        else:
+            raw = sys.stdin.read()
+            if not raw.strip():
+                print(json.dumps([], ensure_ascii=False))
+                return
+            codes = json.loads(raw)
+
         if not isinstance(codes, list):
             print(json.dumps({"error": "输入必须是 JSON 数组"}, ensure_ascii=False), file=sys.stderr)
             sys.exit(1)
