@@ -22,7 +22,7 @@ metadata:
 
 ```bash
 # 先检测是否已授权
-if lark-cli auth whoami >nul 2>&1; then
+if lark-cli auth status >nul 2>&1; then
   echo "lark-cli 已授权，跳过登录"
 else
   # 首次使用必须认证
