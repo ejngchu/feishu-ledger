@@ -9,7 +9,6 @@ import signal
 import subprocess
 import sys
 import time
-from typing import Optional
 
 _lark_cli = "lark-cli.cmd" if platform.system() == "Windows" else "lark-cli"
 if shutil.which(_lark_cli) is None and platform.system() == "Windows":
@@ -80,21 +79,12 @@ class LarkClient:
         if rate_limit is None:
             rate_limit = self.upsert_delay
 
-        # 将 inline --json 参数转为临时文件引用（Windows 避免 shell 破坏 {}）
+        # lark-cli --json 直接接受 JSON 字符串（无需临时文件）
         safe_args = []
-        skip_next = False
         for a in args:
-            if skip_next:
-                skip_next = False
+            if a is None:
                 continue
-            if a == "--json":
-                safe_args.append(a)
-                continue
-            # 紧跟 --json 后的非 @ 开头的参数是被引用的 JSON 内容
-            if safe_args and safe_args[-1] == "--json" and not a.startswith("@"):
-                safe_args.append(self._write_json_temp(a))
-            else:
-                safe_args.append(a)
+            safe_args.append(a)
 
         try:
             for attempt in range(2):
@@ -279,7 +269,11 @@ class LarkClient:
             "base", "+record-upsert",
             "--base-token", self.base_token,
             "--table-id", table_id,
-            "--record-id", record_id,
+        ]
+        # 新建记录（record_id=None）不传 --record-id flag
+        if record_id is not None:
+            args += ["--record-id", record_id]
+        args += [
             "--json", cell_json,
             "--as", "user",
         ]
@@ -317,7 +311,6 @@ class LarkClient:
 
         actual_fields = result.get("data", {}).get("fields", [])
         actual_by_id = {f["id"]: f["name"] for f in actual_fields}
-        actual_by_name = {f["name"]: f["id"] for f in actual_fields}
 
         ok = True
         for name, fid in expected_fields.items():

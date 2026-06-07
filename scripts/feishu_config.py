@@ -25,7 +25,6 @@ import platform
 import re
 import subprocess
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -85,7 +84,7 @@ def _ensure_loaded():
         print(f"  python {Path(__file__).name}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Initializing config from Feishu API...")
+    print("Initializing config from Feishu API...")
     _cached_config = _fetch_all_from_feishu(token)
     _write_config(_cached_config)
     print(f"Config written to {CONFIG_PATH}")
@@ -191,7 +190,7 @@ def _fetch_all_from_feishu(token: str) -> dict:
 
     field_allowlist = {
         "watchlist_field_ids":  ["代码", "名称", "最新价", "涨幅", "产品类型", "更新日期"],
-        "holdings_field_ids":   ["代码", "名称", "产品类型", "交易市场", "组合名称", "总成本", "总份额", "市值", "持有收益", "持有收益率", "年化收益率"],
+        "holdings_field_ids":   ["代码", "名称", "产品类型", "货币", "总成本", "总份额", "市值", "持有收益", "持有收益率", "年化收益率", "一级组合", "二级组合"],
         "trade_field_ids":      ["代码", "名称", "方向", "交易日期", "成本", "金额", "份额", "收益", "收益率"],
         "cash_field_ids":       ["账户", "余额", "备注", "货币", "账户类型"],
     }
@@ -245,7 +244,7 @@ def validate_config(config: dict) -> bool:
 # ── 价格缓存 ───────────────────────────────────────────────
 
 def load_price_cache() -> dict:
-    """返回 {'prices': {code: price, ...}, 'timestamp': 'ISO str'} 或空 dict"""
+    """返回 {'prices': {code: price_entry, ...}, 'hkd_rate': float, 'timestamp': 'ISO str'}"""
     if PRICE_CACHE_PATH.exists():
         try:
             data = json.loads(PRICE_CACHE_PATH.read_text(encoding="utf-8"))
@@ -255,11 +254,20 @@ def load_price_cache() -> dict:
     return {}
 
 
-def save_price_cache(cache: dict):
-    """保存带时间戳的缓存"""
+def save_price_cache(price_map: dict, hkd_rate: float | None = None):
+    """
+    保存价格缓存和汇率。
+    price_map: {code: crawl_result_dict}（完整爬取结果，含 price/change_pct 等）
+    hkd_rate: 当前使用的 HKD/CNY 汇率
+    """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    import math
+    _rate = hkd_rate
+    if _rate is not None and isinstance(_rate, float) and math.isnan(_rate):
+        _rate = None  # 不保存无效汇率
     payload = {
-        "prices": cache,
+        "prices": price_map,
+        "hkd_rate": _rate,
         "timestamp": datetime.now().isoformat(),
     }
     PRICE_CACHE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -267,7 +275,6 @@ def save_price_cache(cache: dict):
 
 def is_cache_valid() -> bool:
     """检查缓存是否在 TTL 时间内有效"""
-    import time as _time
     data = load_price_cache()
     ts = data.get("timestamp", "")
     if not ts:

@@ -1,153 +1,91 @@
 # feishu-ledger
 
-基于 [AKShare](https://akshare.akfamily.xyz/) 的持仓工具脚本，可自动获取 A 股、港股、ETF、开放式基金的多品种行情/净值数据。
+飞书持仓账本 skill：AKShare 爬取 A 股/港股/ETF/基金实时价格同步到飞书多维表格，交易截图自动识别写入交易表并实时核算持仓表（以交易表为唯一数据源），定投截图自动合并到最新定投记录中，报告生成自动处理非交易日（不更新基准）。
 
-## 安装
+> **skill 入口**：[SKILL.md](SKILL.md)
+>
+> **本 README 简介**：项目结构、快速开始、部署说明。
+
+## 项目结构
+
+```
+feishu-ledger/
+├── SKILL.md                 # skill 入口（始终加载）：跨功能概念 + 路由表
+├── references/              # 按需加载：6 个功能块
+│   ├── watchlist-sync.md    # 1. 行情同步
+│   ├── trade-write.md       # 2. 交易记录录入
+│   ├── dca-update.md        # 3. 定投交易更新
+│   ├── holdings-resync.md   # 4. 持仓表全面同步
+│   ├── dividend-sync.md     # 5. 分红记录同步
+│   └── report-generation.md # 6. 报告生成
+├── scripts/                 # 9 个 Python 模块
+│   ├── crawler.py
+│   ├── feishu_base.py
+│   ├── feishu_config.py
+│   ├── feishu_sync.py
+│   ├── market_context.py
+│   ├── render_charts.py
+│   ├── report.py
+│   ├── trade_calc.py
+│   └── dividend_update.py
+└── assets/                  # git 跟踪的运行时配置
+    └── config.json
+```
+
+## 快速开始
 
 ```bash
-pip install akshare pandas pytest
-lark-cli auth login --domain base   # 首次需授权飞书访问
+# 1. 安装依赖
+pip install akshare pandas
+npm install -g @lark-opdev/lark-cli
+
+# 2. 飞书授权
+lark-cli auth login --domain base
+
+# 3. 初始化配置（首次使用）
+python scripts/feishu_config.py
+
+# 4. 同步行情
+python scripts/feishu_sync.py
+
+# 5. 生成报告
+python scripts/report.py
 ```
 
-## 命令
+## 触发词
 
-### 行情查询
+| 触发词 | 功能块 |
+|--------|--------|
+| 「查行情」「看涨跌」「更新自选表」 | 行情同步 |
+| 「新增交易」「记一笔交易」+ 交易截图 | 交易记录录入 |
+| 「更新定投交易」+ 定投截图 | 定投交易更新 |
+| 「更新持仓表」「重算持仓」 | 持仓表全面同步 |
+| 「查分红」「近期有哪些股票分红」 | 分红记录同步 |
+| 「生成报告」「今日报告」「晚间报告」 | 持仓报告生成 |
+
+## 依赖
+
+- Python ≥ 3.8
+- [AKShare](https://pypi.org/project/akshare/) — A 股/港股/基金行情
+- pandas
+- [lark-cli](https://github.com/larksuite/lark-cli) — 飞书 SDK
+- mineru2md — 截图解析（交易录入/定投更新时使用）
+
+## 部署到其他机器
 
 ```bash
-# watchlist - hardcoded 持仓列表，直接输出到终端
-python skill/scripts/watchlist.py
-
-# crawler - JSON I/O，支持 --codes 或 stdin
-python skill/scripts/crawler.py --codes '["sz000333","hk00700","015600"]'
-echo '["sz000333","hk00700"]' | python skill/scripts/crawler.py
+git clone git@github.com:ejngchu/feishu-ledger.git ~/skills/feishu-ledger
+# 然后软链接到目标平台的 skills/ 目录，例如：
+ln -s ~/skills/feishu-ledger ~/.openclaw/workspace-*/.agents/skills/feishu-ledger
 ```
 
-### 飞书同步
+## 飞书表配置
 
-```bash
-python skill/scripts/feishu_sync.py               # 增量更新（只更新日期早于今天的记录）
-python skill/scripts/feishu_sync.py --dry-run    # 预览模式（不实际写入）
-python skill/scripts/feishu_sync.py --force       # 强制更新所有记录
-python skill/scripts/feishu_sync.py --rate-limit 1.5  # 自定义写入间隔（默认 0.8s）
-python skill/scripts/feishu_sync.py --on-error abort   # 遇错立即终止（默认 skip 继续）
-python skill/scripts/feishu_sync.py --quiet      # 静默模式
-python skill/scripts/feishu_sync.py --verify     # 校验飞书字段 ID 与代码配置是否一致
+| 表 | table_id | 用途 |
+|----|---------|------|
+| 自选表 | `tblIP0LuVvZFMjZD` | 最新价、涨幅 |
+| 持仓表 | `tblIqUClte8harRW` | 份额、成本、市值、收益 |
+| 交易表 | `tblkzlJG97qsMFfK` | 历史买卖/分红记录 |
+| 现金表 | `tblLxJaexFUr0hCP` | 各账户余额 |
 
-# 配置初始化（首次运行或字段 ID 不同步时）
-python skill/scripts/feishu_config.py [--dry-run]
-```
-
-### 测试
-
-```bash
-PYTHONPATH=skill/scripts pytest tests/ -v
-PYTHONPATH=skill/scripts pytest tests/test_watchlist.py::TestClassifyCode -v  # 单个测试类
-```
-
-## 支持品种
-
-| 品种 | 来源 | 示例代码 |
-|------|------|---------|
-| A 股股票 | 腾讯行情 → AKShare Sina | sz000333, sh600887 |
-| 港股 | 腾讯行情 → AKShare Sina | hk00700, hk01810 |
-| ETF | 腾讯行情 → AKShare Sina | sh512040, sz159201 |
-| LOF / 开放式基金 | 东方财富全市场 → 逐只查询 | 015600, 519915 |
-
-## 代码前缀规则
-
-| 前缀 | 品种 |
-|------|------|
-| `sh` / `sz` + 6位数字（在 A 股代码范围内） | A 股股票 |
-| `sh` / `sz` + 6位数字（在 A 股代码范围外） | ETF |
-| `hk` + 5位数字 | 港股 |
-| 无前缀，6位数字 | LOF / 开放式基金 |
-
-A 股代码范围：
-- 深圳：`000xxx`, `001xxx`, `002xxx`, `003xxx`, `300xxx`, `301xxx`
-- 上海：`600xxx`, `601xxx`, `603xxx`, `605xxx`, `688xxx`
-
-## feishu_sync.py 执行流程
-
-```
-Step 1: 读取自选表（Watchlist）全部记录
-Step 2: 过滤需要更新的记录（date < today 或 --force）
-Step 3: 爬取最新价与涨幅
-Step 4: 写入自选表（最新价、涨幅、更新日期）
-Step 5: 读取持仓表（Holdings）全部记录
-Step 6: 合并自选表最新价 → 计算市值、持有收益、持有收益率
-Step 7: 写入持仓表（市值、持有收益、持有收益率）
-Step 8: 读取现金表，汇总各账户余额
-```
-
-**持仓表计算公式**：
-- 市值 = 最新价 × 总份额
-- 持有收益 = 市值 - 总成本
-- 持有收益率 = 持有收益 / 总成本 × 100%
-
-## 架构
-
-```
-skill/scripts/
-├── watchlist.py          # 数据获取核心
-│     ├── classify_code()     → stock_a / hk_stock / etf / fund
-│     ├── strip_prefix()      → 去掉 sz/sh/hk 前缀
-│     ├── to_float()          → 安全转 float（处理 %、空格、NaN）
-│     ├── fetch_*_data()     → 按品种抓取（Tencent → AKShare 故障转移）
-│     ├── query_*()          → 按品种匹配到 HoldingItem
-│     ├── HoldingItem          → dataclass（含 price/change_pct/date/extra）
-│     ├── retry()             → 指数退避重试（3 次）
-│     ├── with_timeout()      → 跨平台超时装饰器（基于线程，30s）
-│     └── Logger              → 时间戳日志
-│
-├── crawler.py            # JSON I/O 封装
-│     └── crawl(codes) → [{code, name, matched, price, change_pct, date}]
-│
-├── feishu_base.py        # 飞书基础设施
-│     └── LarkClient          # lark-cli 封装
-│           ├── _run_lark()       → subprocess 调用 + 429 重试
-│           ├── _decode_output()  → UTF-8/GBK 自动识别
-│           ├── get_records()     → 通用分页读取
-│           ├── upsert_record()   → 通用单条写入
-│           ├── upsert_batch()    → 批量写入（500 条/批）
-│           └── verify_fields()   → 校验字段 ID 是否匹配
-│     ├── setup_signal_handlers() → SIGTERM/SIGINT 优雅退出
-│     └── add_common_args()      → 共享参数 (--dry-run/--force/--rate-limit 等)
-│
-├── feishu_sync.py        # 同步主流程（8 步）
-│
-└── feishu_config.py      # 配置管理
-      # ~/.config/feishu-ledger/config.json    - base_token, table/field ID
-      # ~/.cache/feishu-ledger/price_cache.json - 价格缓存
-      # skill/assets/config.json                - upsert_delay 调优
-
-tests/                     # pytest 测试套件
-```
-
-## 数据源与故障转移
-
-| 品种 | 主数据源 | 故障转移 |
-|------|---------|---------|
-| A 股 / 港股 / ETF | 腾讯行情 `qt.gtimg.cn`（批量请求） | AKShare Sina |
-| 开放式基金 | 东方财富全市场 `fund_open_fund_daily_em()` | 逐只查询 `fund_open_fund_info_em()` |
-
-**注意**：`fund_open_fund_daily_em()` 返回的列名是动态的（如 `2026-05-29-单位净值`），需要运行时解析。
-
-## 环境变量
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `FEISHU_BASE_TOKEN` | `FlZObdBVNawsG0s9GhHch2xDnAc` | 飞书 Base token |
-| `FEISHU_WATCHLIST_TABLE_ID` | `tblIP0LuVvZFMjZD` | 自选表 |
-| `FEISHU_HOLDINGS_TABLE_ID` | `tblIqUClte8harRW` | 持仓表 |
-| `FEISHU_TRADE_TABLE_ID` | `tblkzlJG97qsMFfK` | 交易表 |
-| `FEISHU_CASH_TABLE_ID` | - | 现金表 |
-| `FEISHU_UPSERT_DELAY` | `0.8` | 写入间隔（秒） |
-
-## 性能优化（待实施）
-
-详见 `doc/todo.md`。当前主要瓶颈：
-
-| 优化项 | 预期收益 |
-|--------|---------|
-| `fund_open_fund_rank_em` 替代 `fund_open_fund_daily_em` | ~21s → ~5s |
-| 四类品种 threading 并行抓取 | ~27s → ~6s |
+Base token: `FlZObdBVNawsG0s9GhHch2xDnAc`（皮迪克专属）

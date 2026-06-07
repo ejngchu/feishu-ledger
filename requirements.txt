@@ -1,3 +1,0 @@
-akshare>=1.13.0
-pandas>=2.0.0
-pytest>=7.0.0
