@@ -474,7 +474,7 @@ def main():
             print(f"📈 执行财神持仓报告（--report-time {args.report_time}）")
             print("=" * 60)
         _report_cmd = [
-            "python3", str(WORKSPACE / "feishu-ledger" / "scripts" / "report.py"),
+            "python3", str(WORKSPACE / ".agents" / "skills" / "feishu-ledger" / "scripts" / "report.py"),
             "--time", args.report_time,
         ]
         if args.dry_run:
@@ -482,7 +482,7 @@ def main():
         result = subprocess.run(
             _report_cmd,
             capture_output=True, text=True, timeout=300,
-            env={**os.environ, "PYTHONPATH": str(WORKSPACE / "feishu-ledger" / "scripts")},
+            env={**os.environ, "PYTHONPATH": str(WORKSPACE / ".agents" / "skills" / "feishu-ledger" / "scripts")},
         )
         if verbose:
             if result.stdout:
