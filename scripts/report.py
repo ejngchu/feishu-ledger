@@ -26,7 +26,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 WORKSPACE = Path("/root/.openclaw/workspace-Eva")
-SKILL_DIR = WORKSPACE / "feishu-ledger"
+SKILL_DIR = WORKSPACE / ".agents/skills/feishu-ledger"
 sys.path.insert(0, str(SKILL_DIR / "scripts"))
 
 from feishu_base import LarkClient
@@ -202,7 +202,7 @@ def classify_record(r: dict, wl_map: dict) -> dict | None:
         "nav": nav,
         "change_pct": change_pct,
         "change_amount": change_amount,
-        "is_today": bool(wl_date),
+        "is_today": bool(wl_date) and str(wl_date)[:10] == str(date.today()),
         "is_etf": is_etf_code(code),
     }
 
@@ -566,18 +566,10 @@ def generate_report(
         except Exception:
             pass
 
-    if baseline_assets is not None and report_time == "20:30" and is_trading_day:
-        # 今日收益 = 今日总资产 − 昨日总资产（锚点相减，最准确）
-        # 仅在交易日使用锚点相减；非交易日使用 Σ各标的当日收益
-        # 综合涨幅 = 今日收益 / 昨日总资产
-        true_gain = total_assets - baseline_assets
-        today_pct = fp(chg_pct(baseline_assets, true_gain))
-        ref_note = f"（参照 {baseline_date} 收盘 {fm(baseline_assets)}）"
-        today_gain_str = f"{fm(true_gain)}（{today_pct}）{ref_note}"
-    else:
-        # 非交易日：使用 Σ各标的当日收益
-        today_pct = fp(chg_pct(total_mv_all, total_chg_all))
-        today_gain_str = f"{fm(total_chg_all)}（{today_pct}）（非交易日，估值参照最近交易日涨跌）"
+    # 今日收益 = Σ各资产当日涨跌（持仓表各标的 change_amount 之和，忽略汇率波动）
+    # 不依赖 baseline 文件，避免分红同步等操作后基准不一致的问题
+    today_pct = fp(chg_pct(total_mv_all, total_chg_all))
+    today_gain_str = f"{fm(total_chg_all)}（{today_pct}）"
 
     lines += ["━━━━━━━━━━━━━━━",
               f"总持仓市值（CNY） {fm(total_mv_all)}",
@@ -634,6 +626,8 @@ def run_report(report_time: str, force: bool = False, do_sync: bool = True) -> s
     watchlist = load_watchlist(client)
     cash_records = load_cash(client)
 
+    # check_and_sync_if_needed 在子进程中运行，同步完成后需重新读取自选表
+    # 否则 wl_map 里的更新日期始终是同步前的旧数据
     wl_map = build_watchlist_map(watchlist)
     portfolio = build_portfolio(holdings, wl_map)
     cash = build_cash_summary(cash_records)
@@ -660,7 +654,9 @@ def run_report(report_time: str, force: bool = False, do_sync: bool = True) -> s
                 print("[财神] 所有基金净值已更新")
             retry += 1
 
-    is_final = report_time == "20:30"
+    # 是否显示完整涨跌（所有基金/债券均已更新到今日，则为 final）
+    all_updated, pending = check_pending(portfolio)
+    is_final = all_updated
 
     # ── 行情数据（所有报告都含，根据模板级别调整深度） ──
     market_data = None
