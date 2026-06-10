@@ -566,10 +566,34 @@ def generate_report(
         except Exception:
             pass
 
-    # 今日收益 = Σ各资产当日涨跌（持仓表各标的 change_amount 之和，忽略汇率波动）
-    # 不依赖 baseline 文件，避免分红同步等操作后基准不一致的问题
-    today_pct = fp(chg_pct(total_mv_all, total_chg_all))
-    today_gain_str = f"{fm(total_chg_all)}（{today_pct}）"
+    # 今日收益 = 股票收益 + 基金收益 + 债券收益 + 现金收益
+    # 股票/基金/债券收益 = 各标的 change_amount
+    # 现金收益 = 今日现金 − 昨日现金
+    # 港股持仓总市值用昨日汇率换算（消除汇率波动），change_amount 已是今日汇率下的收益无需调整
+    yesterday_cash = 0.0
+    if baseline_file.exists():
+        import json as _json
+        try:
+            prev = _json.loads(baseline_file.read_text(encoding="utf-8"))
+            yesterday_cash = float(prev.get("cash") or 0)
+        except Exception:
+            pass
+
+    # 港股持仓总市值用昨日汇率换算（昨日汇率 × 今日港股份额 × 今日港股价格）
+    hk_items = [x for x in all_items if x.get("currency") == "HKD"]
+    hk_mv_today_rate = sum(x["market_value_cny"] for x in hk_items)
+    hk_mv_yesterday_rate = sum(
+        round(x["market_value"] * baseline_hk_rate, 2)
+        for x in hk_items
+    ) if baseline_hk_rate else hk_mv_today_rate
+    # 持仓总市值（港股按昨日汇率，消除汇率波动）
+    total_mv_all_fixed_hk = total_mv_all - hk_mv_today_rate + hk_mv_yesterday_rate
+    # 现金收益
+    cash_gain = round(total_cash - yesterday_cash, 2)
+    # 今日收益 = 持仓收益（已含港股汇率调整后的市值差） + 现金收益
+    today_gain = round((total_mv_all_fixed_hk - baseline_mv) + cash_gain, 2)
+    today_pct = fp(chg_pct(total_mv_all, today_gain))
+    today_gain_str = f"{fm(today_gain)}（{today_pct}）"
 
     lines += ["━━━━━━━━━━━━━━━",
               f"总持仓市值（CNY） {fm(total_mv_all)}",
